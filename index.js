@@ -17,7 +17,6 @@ config - firebase
 */
 
 const serviceAccount = require('./serviceAccountKey.json');
-const async = require('hbs/lib/async');
 
 initializeApp({
   credential: cert(serviceAccount)
