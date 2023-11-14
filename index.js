@@ -100,6 +100,7 @@ app.post('/createPost', (request, response) => {
 
     function createDocument(uploadedFile) {
       db.collection('posts').doc(fields.id).set({
+        owner: fields.owner,
         id: fields.id,
         caption: fields.caption,
         location: fields.location,
