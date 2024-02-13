@@ -54,65 +54,83 @@ app.get('/posts', (request, response) => {
 endpoint - createPost
 */
 
-app.post('/createPost', (request, response) => {
-  response.set('Access-Control-Allow-Origin', '*')
+app.post('/createPost', async (request, response) => {
+  try {
+    response.set('Access-Control-Allow-Origin', '*');
 
-  let uuid = UUID()
+    const bb = busboy({ headers: request.headers });
 
-  const bb = busboy({ headers: request.headers })
+    let fields = {};
+    let fileData = {};
 
-  let fields = {}
-  let fileData = {}
+    await new Promise((resolve, reject) => {
+      bb.on('file', (name, file, info) => {
+        const { filename, mimeType } = info;
+        let filepath = path.join(os.tmpdir(), filename);
+        file.pipe(fs.createWriteStream(filepath));
 
-  bb.on('file', (name, file, info) => {
-    const { filename, encoding, mimeType } = info
-    // console.log(
-    //   `File [${name}]: filename: %j, encoding: %j, mimeType: %j`, filename, encoding, mimeType
-    // )
-    let filepath = path.join(os.tmpdir(), filename)
-    file.pipe(fs.createWriteStream(filepath))
-    fileData = { filepath, mimeType }
-  })
+        console.log(filepath);
 
-  bb.on('field', (name, val, info) => {
-    // console.log(`Field [${name}]: value: %j`, val)
-    fields[name] = val
-  })
+        fileData = { filepath, mimeType };
+      });
 
-  bb.on('close', () => {
-    bucket.upload(
-      fileData.filepath,
-      {
+      bb.on('field', (name, val) => {
+        fields[name] = val;
+      });
+
+      bb.on('finish', resolve);
+      request.pipe(bb);
+    });
+
+    // Check if the file field is present (file uploaded)
+    if (Object.keys(fileData).length !== 0) {
+      // File upload completed asynchronously, continue processing
+      const uploadedFile = await bucket.upload(fileData.filepath, {
         uploadType: 'media',
         metadata: {
-          metadata: {
-            contentType: fileData.mimeType,
-            firebaseStorageDownloadTokens: uuid
-          }
-        }
-      },
-      (err, uploadedFile) => {
-        if (!err) {
-          createDocument(uploadedFile)
-        }
-      }
-    )
+          contentType: fileData.mimeType,
+          firebaseStorageDownloadTokens: UUID(),
+        },
+      });
 
-    function createDocument(uploadedFile) {
-      db.collection('posts').doc(fields.id).set({
-        owner: fields.owner,
+      const metadata = uploadedFile[1];
+      const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${metadata.bucket}/o/${metadata.name}?alt=media&token=${UUID()}`;
+
+      // Update Firestore document with the file URL
+      const createPostResult = await db.collection('posts').doc(fields.id).set({
+        userHandle: fields.userHandle,
         id: fields.id,
+        userId: fields.userId,
         caption: fields.caption,
         location: fields.location,
         date: fields.date,
-        imageUrl: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${uploadedFile.name}?alt=media&token=${uuid}`
-      }).then(() => {
-        response.status(200).send(fields.id)
-      })
+        profilePic: fields.photoURL === 'false'? false : fields.photoURL,
+        imageUrl: imageUrl,
+      });
+
+      response.status(200).send(fields.id);
+    } else {
+      // No file uploaded, process the rest of the function without file handling
+      const createPostResult = await db.collection('posts').doc(fields.id).set({
+        userHandle: fields.userHandle,
+        id: fields.id,
+        userId: fields.userId,
+        caption: fields.caption,
+        location: fields.location,
+        date: fields.date,
+        profilePic: fields.photoURL === 'false'? false : fields.photoURL,
+        // No imageUrl for posts without a file
+      });
+
+      response.status(200).send(fields.id);
     }
-  })
-  request.pipe(bb)
-})
+  } catch (error) {
+    console.error('Error occurred:', error);
+    response.status(500).send('Error occurred during post creation.');
+  }
+});
+
+
 
 /*
 listen
